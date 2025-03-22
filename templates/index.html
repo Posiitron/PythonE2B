@@ -81,9 +81,16 @@
         color: #856404;
         padding: 12px;
         border-radius: 5px;
-        margin-top: 15px;
         border-left: 4px solid #ffeeba;
         display: none;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1000;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        max-width: 400px;
+        text-align: center;
       }
     </style>
   </head>
@@ -331,9 +338,10 @@
       // Function to show confetti animation
       function showConfetti() {
         confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 }
+          particleCount: 200,
+          spread: 120,
+          origin: { y: 0.6 },
+          scalar: 1.5
         });
       }
       
