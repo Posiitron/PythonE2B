@@ -1,0 +1,9 @@
+Flask>=2.0.0
+langgraph
+e2b_code_interpreter
+langchain
+langchainhub
+langchain-openai
+pydantic<3,>=1.0.0
+dataclasses-json<0.7,>=0.5.7
+python-dotenv>=1.0.0
