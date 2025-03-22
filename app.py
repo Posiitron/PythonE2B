@@ -1,3 +1,9 @@
+from e2b_code_interpreter import Sandbox
+from pydantic.v1 import BaseModel, Field
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import Tool
+from langgraph.graph import END, MessageGraph
+from langchain_openai import ChatOpenAI
 import os
 import json
 from typing import Any, List
@@ -9,14 +15,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import LangChain and LangGraph pieces
-from langchain_openai import ChatOpenAI
-from langgraph.graph import END, MessageGraph
-from langchain_core.tools import Tool
-from langchain_core.messages import ToolMessage
-from pydantic.v1 import BaseModel, Field
 
 # Updated import path for the E2B code interpreter
-from e2b_code_interpreter import Sandbox
 
 
 # --------------- Code Interpreter Tool Definition ---------------
@@ -108,7 +108,8 @@ def execute_tools(messages, tool_map) -> List[RichToolMessage]:
             tool_messages.append(message)
         else:
             content = tool.invoke(tool_call["args"])
-            tool_messages.append(RichToolMessage(content, tool_call_id=tool_call["id"]))
+            tool_messages.append(RichToolMessage(
+                content, tool_call_id=tool_call["id"]))
     return tool_messages
 
 
@@ -143,6 +144,7 @@ compiled_app = workflow.compile()
 # --------------- Build the Flask App ---------------
 
 app = Flask(__name__)
+
 
 @app.route("/", methods=["GET"])
 def index():
@@ -184,24 +186,35 @@ def index():
 
 @app.route("/run", methods=["POST"])
 def run_agent():
-    """
-    Expects JSON with a "prompt" field, e.g.:
-      { "prompt": "plot and show sinus" }
-
-    Then uses the compiled LangChain workflow to process that prompt.
-    """
     data = request.get_json()
     if not data or "prompt" not in data:
         return jsonify({"error": "Missing 'prompt' field in JSON body"}), 400
 
     prompt = data["prompt"]
-    # Invoke the workflow with the human prompt
-    result = compiled_app.invoke([("human", prompt)])
 
-    # Once done, close the E2B sandbox
-    code_interpreter.close()
+    # Create a fresh instance of the code interpreter tool for this request
+    local_code_interpreter = CodeInterpreterFunctionTool()
+    local_tool = local_code_interpreter.to_langchain_tool()
+    local_tools = [local_tool]
+    local_tool_map = {tool.name: tool for tool in local_tools}
 
-    # Collect the message contents from the result
+    # Build a fresh MessageGraph workflow using the local tool
+    local_workflow = MessageGraph()
+    local_workflow.add_node("agent", llm.bind_tools(local_tools))
+    local_workflow.add_node(
+        "action", lambda messages: execute_tools(messages, local_tool_map))
+    local_workflow.add_conditional_edges("agent", should_continue)
+    local_workflow.add_edge("action", "agent")
+    local_workflow.set_entry_point("agent")
+    local_compiled_app = local_workflow.compile()
+
+    # Invoke the workflow with the prompt
+    result = local_compiled_app.invoke([("human", prompt)])
+
+    # Close the local sandbox after the run
+    local_code_interpreter.close()
+
+    # Collect and return the message contents
     messages = [msg.content for msg in result]
     return jsonify({"messages": messages})
 
