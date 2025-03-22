@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>E2B + LangChain AI Assistant</title>
+    <title>E2B + LangGraph AI Assistant</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <style>
       body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
       #chatContainer { border: 1px solid #ddd; height: 400px; overflow-y: auto; padding: 10px; margin: 20px 0; }
@@ -75,10 +76,19 @@
         color: #888;
         font-size: 0.8rem;
       }
+      .development-message {
+        background-color: #fff3cd;
+        color: #856404;
+        padding: 12px;
+        border-radius: 5px;
+        margin-top: 15px;
+        border-left: 4px solid #ffeeba;
+        display: none;
+      }
     </style>
   </head>
   <body>
-    <h1>E2B + LangChain AI Assistant</h1>
+    <h1>E2B + LangGraph AI Assistant</h1>
     <p>Chat with an AI assistant that can execute Python code and create visualizations.</p>
     
     <div id="chatContainer"></div>
@@ -95,6 +105,9 @@
           </div>
         </div>
         <div id="uploadedFiles" class="uploaded-files-list"></div>
+        <div id="developmentMessage" class="development-message">
+          <strong>Note:</strong> Advanced file processing features are still in development.
+        </div>
       </div>
       
       <div>
@@ -300,15 +313,39 @@
         .then(data => {
           // Add file info to the chat context
           if (data.success) {
-            addMessage({
-              role: 'system',
-              content: `Files uploaded: ${data.files.map(f => f.name).join(', ')}. You can ask me to analyze these files.`
-            }, 'assistant');
+            // Show confetti animation
+            showConfetti();
+            
+            // Show development message
+            showDevelopmentMessage();
+            
+            // Add uploaded files message to chat
+            addMessage('ai', `Files uploaded: ${data.files.map(f => f.name).join(', ')}. You can ask me to analyze these files.`);
           }
         })
         .catch(error => {
           console.error('Error uploading files:', error);
         });
+      }
+      
+      // Function to show confetti animation
+      function showConfetti() {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      }
+      
+      // Function to show development message
+      function showDevelopmentMessage() {
+        const devMessage = document.getElementById('developmentMessage');
+        devMessage.style.display = 'block';
+        
+        // Automatically hide the message after 5 seconds
+        setTimeout(() => {
+          devMessage.style.display = 'none';
+        }, 5000);
       }
       
       function displayUploadedFile(file) {
