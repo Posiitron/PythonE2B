@@ -13,6 +13,68 @@
       button { padding: 8px 15px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
       button:hover { background-color: #45a049; }
       .outputSection { margin-top: 10px; border-left: 3px solid #FFA500; padding-left: 10px; }
+      .file-upload-container {
+        margin: 20px 0;
+        width: 100%;
+      }
+      .file-upload-area {
+        border: 2px dashed #ccc;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        position: relative;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      .file-upload-area.highlight {
+        border-color: #4a90e2;
+        background-color: rgba(74, 144, 226, 0.1);
+      }
+      .file-input {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .upload-prompt {
+        color: #555;
+      }
+      .upload-prompt i {
+        font-size: 2rem;
+        margin-bottom: 10px;
+        color: #4a90e2;
+      }
+      .file-types {
+        font-size: 0.8rem;
+        color: #888;
+      }
+      .uploaded-files-list {
+        margin-top: 15px;
+      }
+      .uploaded-file {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background-color: #f5f5f5;
+        border-radius: 4px;
+        margin-bottom: 8px;
+      }
+      .file-info {
+        display: flex;
+        align-items: center;
+      }
+      .file-name {
+        font-weight: 500;
+        margin-right: 10px;
+      }
+      .file-size {
+        color: #888;
+        font-size: 0.8rem;
+      }
     </style>
   </head>
   <body>
@@ -21,10 +83,25 @@
     
     <div id="chatContainer"></div>
     
-    <div>
-      <input id="promptInput" type="text" placeholder="Ask a question or request code..." />
-      <button id="sendBtn">Send</button>
-      <button id="clearBtn">Clear Chat</button>
+    <div class="chat-interface">
+      <!-- File Upload Component -->
+      <div class="file-upload-container">
+        <div class="file-upload-area" id="dropArea">
+          <input type="file" id="fileInput" class="file-input" multiple />
+          <div class="upload-prompt">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <p>Drag & drop files or click to upload</p>
+            <p class="file-types">Supports CSV, Excel, images, and more</p>
+          </div>
+        </div>
+        <div id="uploadedFiles" class="uploaded-files-list"></div>
+      </div>
+      
+      <div>
+        <input id="promptInput" type="text" placeholder="Ask a question or request code..." />
+        <button id="sendBtn">Send</button>
+        <button id="clearBtn">Clear Chat</button>
+      </div>
     </div>
     
     <script>
@@ -159,6 +236,98 @@
       document.getElementById('promptInput').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
       });
+      
+      // File Upload Handling
+      const dropArea = document.getElementById('dropArea');
+      const fileInput = document.getElementById('fileInput');
+      const uploadedFiles = document.getElementById('uploadedFiles');
+      
+      // Prevent default drag behaviors
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, preventDefaults, false);
+      });
+      
+      function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      
+      // Highlight drop area when item is dragged over it
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropArea.addEventListener(eventName, highlight, false);
+      });
+      
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, unhighlight, false);
+      });
+      
+      function highlight() {
+        dropArea.classList.add('highlight');
+      }
+      
+      function unhighlight() {
+        dropArea.classList.remove('highlight');
+      }
+      
+      // Handle dropped files
+      dropArea.addEventListener('drop', handleDrop, false);
+      fileInput.addEventListener('change', handleFiles, false);
+      
+      function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        handleFiles({target: {files: files}});
+      }
+      
+      function handleFiles(e) {
+        const files = e.target.files;
+        uploadFiles(files);
+      }
+      
+      function uploadFiles(files) {
+        const formData = new FormData();
+        
+        for (let i = 0; i < files.length; i++) {
+          formData.append('files', files[i]);
+          displayUploadedFile(files[i]);
+        }
+        
+        fetch('/upload', {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+          // Add file info to the chat context
+          if (data.success) {
+            addMessage({
+              role: 'system',
+              content: `Files uploaded: ${data.files.map(f => f.name).join(', ')}. You can ask me to analyze these files.`
+            }, 'assistant');
+          }
+        })
+        .catch(error => {
+          console.error('Error uploading files:', error);
+        });
+      }
+      
+      function displayUploadedFile(file) {
+        const fileElement = document.createElement('div');
+        fileElement.className = 'uploaded-file';
+        fileElement.innerHTML = `
+          <div class="file-info">
+            <span class="file-name">${file.name}</span>
+            <span class="file-size">${formatFileSize(file.size)}</span>
+          </div>
+        `;
+        uploadedFiles.appendChild(fileElement);
+      }
+      
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' bytes';
+        else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        else return (bytes / 1048576).toFixed(1) + ' MB';
+      }
     </script>
   </body>
 </html> 

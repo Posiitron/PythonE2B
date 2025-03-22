@@ -1,10 +1,14 @@
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
 import os
+from werkzeug.utils import secure_filename
+import uuid
+import asyncio
 
 from code_interpreter import CodeInterpreterFunctionTool
 from conversation import ConversationManager
-from workflow import create_workflow, SYSTEM_MESSAGE
+from workflow import create_workflow, SYSTEM_MESSAGE, WorkflowManager
+from langchain_openai import ChatOpenAI
 
 # Load environment variables from .env
 load_dotenv()
@@ -14,6 +18,25 @@ app = Flask(__name__)
 
 # Initialize conversation manager
 conversation_manager = ConversationManager()
+
+# Initialize LLM client for file analysis
+llm_client = ChatOpenAI(
+    model="gpt-3.5-turbo", 
+    temperature=0.1
+)
+
+# Configure file upload settings
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'xls', 'json', 'py'}
+
+# Create uploads directory if it doesn't exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route("/", methods=["GET"])
 def index():
@@ -31,16 +54,23 @@ def run_agent():
     
     # Get memory for this session
     memory = conversation_manager.get_memory(session_id)
+    conversation = conversation_manager.get_conversation(session_id)
     
     # Create a fresh instance of the code interpreter tool for this request
     local_code_interpreter = CodeInterpreterFunctionTool()
     
     try:
-        # Create workflow with the local tool instance
-        workflow_app = create_workflow(local_code_interpreter)
-        
-        # Process the request with memory and system message
-        result = process_with_memory(workflow_app, memory, prompt)
+        # Check if there are files to process
+        if hasattr(conversation, 'files') and conversation.files:
+            # Create workflow manager for file processing
+            workflow_manager = WorkflowManager(llm_client)
+            # Process with file support
+            result = asyncio.run(process_with_files(workflow_manager, conversation, prompt))
+        else:
+            # Create normal workflow without file support
+            workflow_app = create_workflow(local_code_interpreter)
+            # Process normally
+            result = process_with_memory(workflow_app, memory, prompt)
         
         # Process and enhance outputs for better display
         processed_messages = process_messages(result)
@@ -63,6 +93,47 @@ def clear_session():
     
     conversation_manager.clear_memory(session_id)
     return jsonify({"status": "success", "message": f"Session {session_id} cleared"})
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'files' not in request.files:
+        return jsonify({'success': False, 'error': 'No file part'})
+    
+    uploaded_files = request.files.getlist('files')
+    
+    if not uploaded_files or uploaded_files[0].filename == '':
+        return jsonify({'success': False, 'error': 'No selected file'})
+    
+    file_data = []
+    
+    for file in uploaded_files:
+        if file and allowed_file(file.filename):
+            # Generate a unique filename to avoid collisions
+            original_filename = secure_filename(file.filename)
+            file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+            unique_filename = f"{uuid.uuid4().hex}.{file_extension}" if file_extension else f"{uuid.uuid4().hex}"
+            
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            file.save(file_path)
+            
+            # Store file metadata
+            file_info = {
+                'id': unique_filename,
+                'name': original_filename,
+                'path': file_path,
+                'type': file_extension,
+                'size': os.path.getsize(file_path)
+            }
+            file_data.append(file_info)
+    
+    # Add file info to the conversation context
+    if hasattr(request, 'conversation') and request.conversation:
+        request.conversation.add_files(file_data)
+    
+    return jsonify({
+        'success': True,
+        'files': file_data
+    })
 
 def process_with_memory(workflow_app, memory, prompt):
     """Process a prompt using the workflow and memory"""
@@ -98,19 +169,34 @@ def process_with_memory(workflow_app, memory, prompt):
 def process_messages(messages):
     """Process and enhance message outputs for better display"""
     processed_messages = []
+    
+    # Check if messages is a list of dictionaries already
+    if isinstance(messages, list) and all(isinstance(msg, dict) for msg in messages):
+        # Already in the right format
+        return messages
+    
+    # Process object-style messages
     for msg in messages:
-        if hasattr(msg, 'raw_output') and msg.raw_output:
-            processed_output = process_tool_output(msg.raw_output)
+        try:
+            if hasattr(msg, 'raw_output') and msg.raw_output:
+                processed_output = process_tool_output(msg.raw_output)
+                processed_messages.append({
+                    "type": msg.type,
+                    "content": msg.content,
+                    "enhanced_output": processed_output
+                })
+            else:
+                processed_messages.append({
+                    "type": msg.type,
+                    "content": msg.content
+                })
+        except Exception as e:
+            # If there's an error processing a message, include an error message
             processed_messages.append({
-                "type": msg.type,
-                "content": msg.content,
-                "enhanced_output": processed_output
+                "type": "ai",
+                "content": f"Error processing results: {str(e)}"
             })
-        else:
-            processed_messages.append({
-                "type": msg.type,
-                "content": msg.content
-            })
+    
     return processed_messages
 
 def process_tool_output(output):
@@ -136,6 +222,21 @@ def process_tool_output(output):
     }
     
     return enhanced_output
+
+async def process_with_files(workflow_manager, conversation, prompt):
+    """Process a prompt with file support using the workflow manager"""
+    # Check if there are any files in the conversation
+    files = getattr(conversation, 'files', [])
+    
+    if files:
+        # Process with file support
+        return await workflow_manager.process_message_with_files(prompt, conversation)
+    else:
+        # We don't have workflow_app and memory in scope here, so just return an error message
+        return [{
+            "type": "ai", 
+            "content": "I don't see any uploaded files to analyze. Please upload a file first."
+        }]
 
 if __name__ == "__main__":
     # Check for required environment variables

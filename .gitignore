@@ -1,3 +1,18 @@
 .env
 __pycache__/
 myenv/
+
+# Uploaded files
+uploads/
+*.csv
+*.xlsx
+*.xls
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.txt
+*.json
+
+# E2B cache
+.e2b/
